@@ -42,8 +42,9 @@ bool TreePropagator::reachable(int node, std::vector<bool>& blue, bool doDFS) {
 		if (blue[i] == false && getNodeVar(i).isFixed() && getNodeVar(i).isTrue()) {
 			if (so.lazy) {
 				std::unordered_set<edge_id> badEdges;
+				std::unordered_set<node_id> badNodes;
 				std::vector<bool> pink(nbNodes(), false);
-				DFSPink(i, pink, blue, badEdges);
+				DFSPink(i, pink, blue, badEdges, badNodes);
 				// REASON: 0<i<n visited[i] /\ any-fixed-not-visited => fail
 
 				vec<Lit> ps;
@@ -53,6 +54,9 @@ bool TreePropagator::reachable(int node, std::vector<bool>& blue, bool doDFS) {
 				for (it = badEdges.begin(); it != badEdges.end(); ++it) {
 					assert(getEdgeVar(*it).isFixed());
 					ps.push(getEdgeVar(*it).getValLit());
+				}
+				for (const int n : badNodes) {
+					ps.push(getNodeVar(n).getValLit());
 				}
 				assert(getNodeVar(i).isFixed());
 				ps.push(getNodeVar(i).getValLit());
@@ -67,8 +71,9 @@ bool TreePropagator::reachable(int node, std::vector<bool>& blue, bool doDFS) {
 			Clause* r = nullptr;
 			if (so.lazy) {
 				std::unordered_set<edge_id> badEdges;
+				std::unordered_set<node_id> badNodes;
 				std::vector<bool> pink(nbNodes(), false);
-				DFSPink(i, pink, blue, badEdges);
+				DFSPink(i, pink, blue, badEdges, badNodes);
 				// REASON: 0<i<n visited[i] => unfixed-not-visited = false
 
 				vec<Lit> ps;
@@ -79,6 +84,9 @@ bool TreePropagator::reachable(int node, std::vector<bool>& blue, bool doDFS) {
 				for (it = badEdges.begin(); it != badEdges.end(); ++it) {
 					assert(getEdgeVar(*it).isFixed());
 					ps.push(getEdgeVar(*it).getValLit());
+				}
+				for (const int n : badNodes) {
+					ps.push(getNodeVar(n).getValLit());
 				}
 				r = Reason_new(ps);
 			}
@@ -171,6 +179,8 @@ int TreePropagator::articulations(int n, std::vector<bool>& reachable, int& coun
 				walkBrokenBridges(cause1, reachable, walk1, walk2, bridge, reasons, isArt);
 				vec<Lit> ps;
 				ps.push();
+				const int origCause1 = cause1;
+				const int origCause2 = cause2;
 				if (!isTerminal[cause1]) {
 					if (memory.find(cause1) == memory.end()) {
 						struct CC cc;
@@ -206,6 +216,15 @@ int TreePropagator::articulations(int n, std::vector<bool>& reachable, int& coun
 					} else {
 						cause2 = memory[cause2];
 					}
+				}
+				// The fixed-true walk to a terminal may pass through an articulation node that has
+				// in-edges but is not fixed yet (its coherence has not run). Only use a terminal
+				// that lies on the same side of the cut as the cause it replaces.
+				if (!walk1[cause1]) {
+					cause1 = origCause1;
+				}
+				if (walk2[cause2] || (isArt && cause2 == bridge)) {
+					cause2 = origCause2;
 				}
 				assert(getNodeVar(cause1).isFixed());
 				ps.push(getNodeVar(cause1).getValLit());
@@ -604,13 +623,19 @@ bool TreePropagator::propagate() {
 		}
 	}
 
-	/*for (int i = 0; i < nbNodes(); i++) {
-			if (getNodeVar(i).isFixed() && getNodeVar(i).isTrue()) {
-					bool blue[nbNodes()];
-					if(!reachable(i,blue,true))
-							return false;
+	// The reachability checks above are skipped based on node counts that can be stale
+	// (the count comes from a DFS done earlier in this round, possibly from another node,
+	// and nb_innodes misses nodes this propagator set in itself). Check once from an
+	// in-node so that every in-node is reachable and unreachable nodes are removed.
+	for (int i = 0; i < nbNodes(); i++) {
+		if (getNodeVar(i).isFixed() && getNodeVar(i).isTrue()) {
+			std::vector<bool> blue(nbNodes(), false);
+			if (!reachable(i, blue, true)) {
+				return false;
 			}
-			}*/
+			break;
+		}
+	}
 
 	return true;
 }
@@ -928,9 +953,12 @@ void TreePropagator::DFSBlue(int r, std::vector<bool>& visited, int& count) {
 /**
  * Goes through all edges until it hits a 'blue' node.
  * badEdges is the set of edges with one node pink and one node blue.
+ * badNodes is the set of out-nodes that are pink and adjacent to blue through
+ * an edge that is not out (DFSBlue does not walk into out-nodes).
  */
 void TreePropagator::DFSPink(int r, std::vector<bool>& visited, std::vector<bool>& blue,
-														 std::unordered_set<edge_id>& badEdges) {
+														 std::unordered_set<edge_id>& badEdges,
+														 std::unordered_set<node_id>& badNodes) {
 	visited[r] = true;
 	for (unsigned int i = 0; i < adj[r].size(); i++) {
 		const int e = adj[r][i];
@@ -943,10 +971,13 @@ void TreePropagator::DFSPink(int r, std::vector<bool>& visited, std::vector<bool
 				continue;
 			}
 		} else if (blue[other]) {
+			// The edge is not out, so r is only kept away from blue by being out itself
+			assert(getNodeVar(r).isFixed() && getNodeVar(r).isFalse());
+			badNodes.insert(r);
 			continue;
 		}
 		if (visited[other] == false) {
-			DFSPink(other, visited, blue, badEdges);
+			DFSPink(other, visited, blue, badEdges, badNodes);
 		}
 	}
 }

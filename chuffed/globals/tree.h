@@ -91,7 +91,7 @@ public:
 	void getUnkEdgesInCC(int r, std::vector<bool>& visited, std::unordered_set<edge_id>& unk);
 	void DFSBlue(int r, std::vector<bool>& visited, int& count);
 	void DFSPink(int r, std::vector<bool>& visited, std::vector<bool>& blue,
-							 std::unordered_set<int>& badEdges);
+							 std::unordered_set<int>& badEdges, std::unordered_set<int>& badNodes);
 	void walkIsland(int r, std::vector<bool>& visited, int avoidBridge, bool isArt = false,
 									int parent = -1);
 	void walkBrokenBridges(int r, std::vector<bool>& reachable, std::vector<bool>& walked,
