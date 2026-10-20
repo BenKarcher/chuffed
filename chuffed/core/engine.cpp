@@ -529,6 +529,90 @@ void Engine::blockCurrentSol() {
 	sat.confl = &c;
 }
 
+void Engine::initCandidateTracking() {
+	candidateTracking.clear();
+	totalUnknowns = 0;
+	for (int i = 0; i < outputs.size(); i++) {
+		Var* v = (Var*)outputs[i];
+		int lo, hi;
+		if (v->getType() == BOOL_VAR) {
+			lo = 0;
+			hi = 1;
+		} else {
+			IntVar* iv = (IntVar*)outputs[i];
+			lo = iv->getMin0();
+			hi = iv->getMax0();
+		}
+		int domSize = hi - lo + 1;
+		VarCandidates vc;
+		vc.min0 = lo;
+		vc.max0 = hi;
+		vc.seen.assign(domSize, false);
+		vc.unseenCount = domSize;
+		totalUnknowns += domSize;
+		candidateTracking.push_back(vc);
+	}
+}
+
+void Engine::harvestCandidateSolution() {
+	for (int i = 0; i < outputs.size(); i++) {
+		Var* v = (Var*)outputs[i];
+		int val;
+		if (v->getType() == BOOL_VAR) {
+			val = ((BoolView*)outputs[i])->getVal();
+		} else {
+			val = ((IntVar*)outputs[i])->getVal();
+		}
+		VarCandidates& vc = candidateTracking[i];
+		int idx = val - vc.min0;
+		if (idx >= 0 && idx < (int)vc.seen.size() && !vc.seen[idx]) {
+			vc.seen[idx] = true;
+			vc.unseenCount--;
+			totalUnknowns--;
+		}
+	}
+}
+
+void Engine::blockSeenCandidates() {
+	// Like blockCurrentSol(), but the conflict says:
+	// "at least one output var must take an unseen value."
+	// Each literal is getLit(unseenVal, LR_EQ) which is l_False
+	// at the solution point (the var has a different value).
+	Clause& c = *Reason_new(totalUnknowns);
+	bool root_failure = true;
+	int idx = 0;
+	for (int i = 0; i < outputs.size(); i++) {
+		Var* v = (Var*)outputs[i];
+		VarCandidates& vc = candidateTracking[i];
+		if (vc.unseenCount == 0) continue;
+		if (v->getType() == BOOL_VAR) {
+			BoolView* bv = (BoolView*)outputs[i];
+			for (int val = vc.min0; val <= vc.max0; val++) {
+				if (!vc.seen[val - vc.min0]) {
+					c[idx] = bv->getLit(val != 0);
+					if (!sat.isRootLevel(var(c[idx]))) root_failure = false;
+					assert(sat.value(c[idx]) == l_False);
+					idx++;
+				}
+			}
+		} else {
+			IntVar* iv = (IntVar*)outputs[i];
+			for (int val = vc.min0; val <= vc.max0; val++) {
+				if (!vc.seen[val - vc.min0]) {
+					c[idx] = iv->getLit(val, LR_EQ);
+					if (!sat.isRootLevel(var(c[idx]))) root_failure = false;
+					assert(sat.value(c[idx]) == l_False);
+					idx++;
+				}
+			}
+		}
+	}
+	if (root_failure) {
+		sat.btToLevel(0);
+	}
+	sat.confl = &c;
+}
+
 unsigned int Engine::getRestartLimit(unsigned int i) {
 	switch (so.restart_type) {
 		case NONE:
@@ -677,6 +761,10 @@ RESULT Engine::search(const std::string& problemLabel) {
 
 	decisionLevelTip.push_back(1);
 
+	if (so.true_candidates) {
+		initCandidateTracking();
+	}
+
 	while (true) {
 		const int nodeid = nextnodeid;
 		nextnodeid++;
@@ -744,6 +832,28 @@ RESULT Engine::search(const std::string& problemLabel) {
 				}
 #endif
 				return RES_GUN;
+			}
+
+			// If the conflict clause consists entirely of root-level literals the
+			// instance is globally unsatisfiable even though decisionLevel() > 0.
+			// Lazy propagators (e.g. ConnectedPropagator / TreePropagator) can
+			// generate such root-level explanations while search is deeper.
+			// Passing them to sat.analyze() would assert(clevel > 0) inside
+			// findConflictLevel() — crashing in a debug build and producing a
+			// memory fault in a release/WASM build.  Detect the case here and
+			// return RES_GUN immediately, matching how blockSeenCandidates()
+			// and blockCurrentSol() handle the equivalent root_failure scenario.
+			if (so.lazy && sat.confl != nullptr) {
+				bool allRootLevel = true;
+				for (unsigned int i = 0; i < sat.confl->size(); i++) {
+					if (!sat.isRootLevel(var((*sat.confl)[i]))) {
+						allRootLevel = false;
+						break;
+					}
+				}
+				if (allRootLevel) {
+					return RES_GUN;
+				}
 			}
 
 			// Derive learnt clause and perform backjump
@@ -1027,6 +1137,15 @@ RESULT Engine::search(const std::string& problemLabel) {
 
 				mostRecentLabel = "";
 				if (opt_var == nullptr) {
+					if (so.true_candidates) {
+						harvestCandidateSolution();
+						if (totalUnknowns == 0) {
+							return RES_SAT;
+						}
+						// Conflict: "at least one var must take an unseen value"
+						blockSeenCandidates();
+						goto Conflict;
+					}
 					if (solutions == so.nof_solutions) {
 						return RES_SAT;
 					}

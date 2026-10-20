@@ -1,3 +1,9 @@
+> **Fork note:** This is a modified fork of [Chuffed](https://github.com/chuffed/chuffed)
+> that adds a `--true-candidates` option. When it's on, Chuffed collects every value each
+> output variable takes across all solutions, adding a clause after each solution that forces
+> a new value to appear. It's used by [puzzle_solver](https://github.com/BenKarcher/puzzle_solver).
+> All other behaviour matches upstream.
+
 # Chuffed, a lazy clause generation solver 
 
 Geoffrey Chu, Peter J. Stuckey, Andreas Schutt, Thorsten Ehlers, Graeme Gange, Kathryn Francis

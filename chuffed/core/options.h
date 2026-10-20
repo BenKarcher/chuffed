@@ -19,6 +19,7 @@ class Options {
 public:
 	// Solver options
 	int nof_solutions{1};                       // Number of solutions to find
+	bool true_candidates{false};                // Compute true candidate sets for output vars
 	duration time_out;                          // Amount of time before giving up
 	int rnd_seed{0};                            // Random seed
 	int verbosity{0};                           // Verbosity

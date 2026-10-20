@@ -585,6 +585,9 @@ void parseOptions(int& argc, char**& argv, std::string* fileArg, const std::stri
 			so.ldsbad = boolBuffer;
 		} else if (cop.getBool("--well-founded", boolBuffer)) {
 			so.well_founded = boolBuffer;
+		} else if (cop.getBool("--true-candidates", boolBuffer)) {
+			so.true_candidates = boolBuffer;
+			if (boolBuffer) so.nof_solutions = 0;
 		} else if (cop.get("-a")) {
 			so.nof_solutions = 0;
 		} else if (cop.get("-f")) {

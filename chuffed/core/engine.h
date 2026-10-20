@@ -6,6 +6,7 @@
 #include <functional>
 #include <random>
 #include <string>
+#include <vector>
 
 #define DEBUG 0
 
@@ -95,6 +96,18 @@ private:
 	void simplifyDB();
 	void blockCurrentSol();
 	static unsigned int getRestartLimit(unsigned int i);  // Return the restart limit for restart i
+
+	// True-candidates mode
+	struct VarCandidates {
+		int min0, max0;
+		std::vector<bool> seen;  // seen[v - min0] = true if value v appeared in any solution
+		int unseenCount;
+	};
+	std::vector<VarCandidates> candidateTracking;
+	int totalUnknowns{0};
+	void initCandidateTracking();
+	void harvestCandidateSolution();
+	void blockSeenCandidates();
 	void toggleVSIDS() const;
 #if HAS_VAR_IMPACT
 	vec<int>& getVarSizes(vec<int>& outVarSizes) const;
